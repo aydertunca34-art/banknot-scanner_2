@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1565c0">
+<title>Banknot Scanner - TL Seri No</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f3f6f9;color:#17202a}
+header{background:#1565c0;color:#fff;padding:14px;text-align:center;font-weight:700;font-size:20px}
+main{max-width:760px;margin:auto;padding:12px}.card{background:#fff;border-radius:15px;padding:12px;margin-bottom:12px;box-shadow:0 2px 10px #0001}
+.camera{position:relative;overflow:hidden;border-radius:13px;background:#111}.camera video{width:100%;display:block;aspect-ratio:4/3;object-fit:cover}
+.frame{position:absolute;left:6%;right:6%;top:18%;bottom:18%;border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}
+.frame:after{content:'Banknotu buraya hizalayın';position:absolute;left:0;right:0;bottom:-30px;text-align:center;color:#fff;font-weight:700;text-shadow:0 1px 3px #000}
+button,select,input{font:inherit}button{border:0;border-radius:10px;padding:12px 14px;background:#1565c0;color:#fff;font-weight:700;margin:5px 0}button.secondary{background:#455a64}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+label{display:block;font-weight:700;margin-top:8px}input,select{width:100%;padding:11px;border:1px solid #bbb;border-radius:9px;margin-top:5px}
+#status{white-space:pre-wrap;margin-top:8px;font-size:14px}.summary{font-weight:700;font-size:17px}.small{font-size:12px;color:#667}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{border-bottom:1px solid #ddd;padding:8px;text-align:left}
+.ok{color:#087f23;font-weight:700}.warn{color:#a35b00;font-weight:700}.ref{font-size:13px;line-height:1.4}.ref a{color:#1565c0}
+</style>
+</head>
+<body>
+<header>💵 BANKNOT SCANNER</header>
+<main>
+<section class="card">
+  <div class="camera"><video id="video" autoplay playsinline muted></video><div class="frame"></div></div>
+  <div class="row"><button id="start">📷 Kamerayı Aç</button><button id="scan" class="secondary">🔎 Seri No Tara</button></div>
+  <div id="status">Kamera açılmadı.</div>
+</section>
+
+<section class="card">
+  <label>Banknot Değeri</label>
+  <select id="value"><option value="">Otomatik / seçin</option><option>5</option><option>10</option><option>20</option><option>50</option><option>100</option><option>200</option></select>
+  <label>Seri Numarası</label>
+  <input id="serial" autocomplete="off" placeholder="Örn. G001123456">
+  <div class="row"><button id="save">💾 KAYDET</button><button id="export" class="secondary">📊 EXCEL'E AKTAR</button></div>
+</section>
+
+<section class="card">
+  <div class="summary" id="summary">0 adet — 0 TL</div>
+  <div style="overflow:auto;margin-top:8px"><table><thead><tr><th>Tarih</th><th>TL</th><th>Seri No</th></tr></thead><tbody id="tbody"></tbody></table></div>
+  <button id="clear" class="secondary">Kayıtları Temizle</button>
+</section>
+
+<section class="card ref">
+  <b>Banknot referansı</b><br>
+  Uygulama 5, 10, 20, 50, 100 ve 200 TL kupürlerini hedefler. TCMB'nin güncel banknot sayfasında E9 grubunun farklı seri/tertiplerinin aynı anda dolaşımda olduğu belirtiliyor; bu nedenle seri numarası biçimini tek bir görsele bağlamak yerine OCR + doğrulama kullanıyoruz.
+  <br><br><a href="https://www.tcmb.gov.tr/wps/wcm/connect/TR/TCMB+TR/Main+Menu/Banknotlar/Dolasimdaki+Banknotlar/5.+Tertip+Banknotlar/" target="_blank">TCMB banknot görsellerini aç</a>
+</section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const video=document.getElementById('video'),statusEl=document.getElementById('status'),valueEl=document.getElementById('value'),serialEl=document.getElementById('serial'),tbody=document.getElementById('tbody'),summary=document.getElementById('summary');
+let rows=JSON.parse(localStorage.getItem('banknotRows')||'[]');let stream=null;
+const DENOMS=['200','100','50','20','10','5'];
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function render(){tbody.innerHTML='';let total=0;rows.forEach(r=>{total+=Number(r.value)||0;const tr=document.createElement('tr');tr.innerHTML='<td>'+esc(r.date)+'</td><td>'+esc(r.value)+'</td><td>'+esc(r.serial)+'</td>';tbody.appendChild(tr)});summary.textContent=rows.length+' adet — '+total+' TL'}
+function normalize(s){return s.toUpperCase().replace(/[\r\n]+/g,' ').replace(/[İIı]/g,'I').replace(/[^A-Z0-9ÇĞÖŞÜ ]/g,' ')}
+function serialCandidates(text){
+ const t=normalize(text).replace(/\s+/g,' ');const compact=t.replace(/\s+/g,'');
+ const patterns=[/[A-ZÇĞÖŞÜ]{1,3}\d{6,10}/g,/\d{6,10}[A-ZÇĞÖŞÜ]{1,3}/g];
+ let out=[];for(const p of patterns){const m=compact.match(p)||[];out.push(...m)}
+ return [...new Set(out)].filter(x=>/\d{6,10}/.test(x)).sort((a,b)=>b.length-a.length);
+}
+function detectValue(text){
+ const t=normalize(text);for(const d of DENOMS){if(new RegExp('(^|\\s)'+d+'(\\s|$)').test(t))return d}
+ const words={200:'IKIYUZ',100:'YUZ',50:'ELLI',20:'YIRMI',10:'ON',5:'BES'};for(const d of DENOMS){if(t.includes(words[d]))return d}return '';
+}
+function prepCanvas(src,x,y,w,h,scale=2){
+ const c=document.createElement('canvas');c.width=Math.max(1,Math.floor(w*scale));c.height=Math.max(1,Math.floor(h*scale));const g=c.getContext('2d');g.drawImage(src,x,y,w,h,0,0,c.width,c.height);const img=g.getImageData(0,0,c.width,c.height),d=img.data;
+ for(let i=0;i<d.length;i+=4){const lum=.299*d[i]+.587*d[i+1]+.114*d[i+2];let v=(lum-128)*1.45+128;v=Math.max(0,Math.min(255,v));d[i]=d[i+1]=d[i+2]=v}
+ g.putImageData(img,0,0);return c;
+}
+async function ocrCanvas(c,mode){
+ const r=await Tesseract.recognize(c,'eng',{logger:m=>{if(m.status&&typeof m.progress==='number')statusEl.textContent=mode+' — '+m.status+' '+Math.round(m.progress*100)+'%'}});
+ return r.data.text||'';
+}
+document.getElementById('start').onclick=async()=>{try{
+ if(!window.isSecureContext)throw new Error('Kamera için HTTPS gerekir.');
+ if(!navigator.mediaDevices?.getUserMedia)throw new Error('Tarayıcı kamera API desteği vermiyor.');
+ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});video.srcObject=stream;await video.play();statusEl.textContent='Kamera hazır. Banknotu beyaz çerçeveye mümkün olduğunca düz yerleştirin.';
+ }catch(e){statusEl.textContent='Kamera açılamadı: '+e.message+'\nChrome kamera iznini kontrol edin.'}}
+;
+document.getElementById('scan').onclick=async()=>{
+ if(!video.srcObject){statusEl.textContent='Önce Kamerayı Aç düğmesine basın.';return}
+ if(video.readyState<2){statusEl.textContent='Kamera görüntüsü henüz hazır değil.';return}
+ try{
+  const c=document.createElement('canvas');c.width=video.videoWidth||1280;c.height=video.videoHeight||720;c.getContext('2d').drawImage(video,0,0,c.width,c.height);
+  const W=c.width,H=c.height;const regions=[
+   ['Tam görüntü',0,0,W,H,1.4],
+   ['Üst seri alanı',0,0,W,H*.38,2.2],
+   ['Alt seri alanı',0,H*.62,W,H*.38,2.2],
+   ['Orta-üst alan',0,H*.18,W,H*.45,2.0]
+  ];let all='';let best='';let detected=valueEl.value||'';
+  for(const r of regions){const pc=prepCanvas(c,r[1],r[2],r[3],r[4],r[5]);const text=await ocrCanvas(pc,r[0]);all+=' '+text;if(!detected)detected=detectValue(text);const cs=serialCandidates(text);if(cs.length&&cs[0].length>(best.length))best=cs[0]}
+  const candidates=serialCandidates(all);if(candidates.length)best=candidates[0];if(!detected)detected=detectValue(all);
+  if(best)serialEl.value=best;if(detected)valueEl.value=detected;
+  if(best){statusEl.innerHTML='<span class="ok">✓ Seri No bulundu: '+esc(best)+'</span>'+(detected?'\nDeğer: '+detected+' TL':'\nDeğer otomatik belirlenemedi; listeden seçin.')}else{statusEl.innerHTML='<span class="warn">Seri numarası bulunamadı.</span>\nBanknotu çerçeveye tamamen sığdırın, ışığı artırın ve tekrar tarayın.'}
+ }catch(e){statusEl.textContent='OCR hatası: '+e.message}
+};
+document.getElementById('save').onclick=()=>{const serial=serialEl.value.trim().toUpperCase().replace(/\s+/g,''),value=valueEl.value;if(!serial)return alert('Seri numarası girin veya tarayın.');if(!value)return alert('Banknot değerini seçin.');if(rows.some(r=>r.serial===serial))return alert('Bu seri numarası zaten kayıtlı.');rows.push({date:new Date().toLocaleString('tr-TR'),value,serial});localStorage.setItem('banknotRows',JSON.stringify(rows));render();serialEl.value='';valueEl.value='';statusEl.textContent='✓ Kayıt tamamlandı.'};
+document.getElementById('export').onclick=()=>{if(!rows.length)return alert('Dışa aktarılacak kayıt yok.');let csv='\uFEFFTarih;Banknot Değeri (TL);Seri Numarası\n';rows.forEach(r=>csv+='"'+r.date+'";"'+r.value+'";"'+r.serial+'"\n');const b=new Blob([csv],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='banknot_kayitlari.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
+document.getElementById('clear').onclick=()=>{if(confirm('Tüm kayıtlar silinsin mi?')){rows=[];localStorage.removeItem('banknotRows');render()}};render();
+</script>
+</body></html>
