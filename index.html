@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Banknot Seri Numarası Tarayıcı V3.3</title>
+    <!-- Tesseract.js v5 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f9;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h2 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        .card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .btn {
+            display: inline-block;
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+            text-align: center;
+        }
+        .btn-primary { background-color: #3498db; color: white; }
+        .btn-primary:hover { background-color: #2980b9; }
+        .btn-success { background-color: #2ecc71; color: white; }
+        .btn-success:hover { background-color: #27ae60; }
+        .btn-danger { background-color: #e74c3c; color: white; }
+        .btn-danger:hover { background-color: #c0392b; }
+        .btn:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: 15px auto;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+        }
+        video {
+            width: 100%;
+            display: block;
+        }
+        .scan-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 60px;
+            border: 3px solid #2ecc71;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+            box-sizing: border-box;
+        }
+        .preview-container {
+            text-align: center;
+            margin: 15px auto;
+        }
+        .preview-container canvas {
+            border: 2px solid #7f8c8d;
+            background: #fff;
+            max-width: 100%;
+            height: auto;
+        }
+        .status-box {
+            padding: 10px;
+            border-radius: 5px;
+            background: #eec;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 0;
+        }
+        .status-loading { background-color: #f39c12; color: white; }
+        .status-ready { background-color: #2ecc71; color: white; }
+        .status-error { background-color: #e74c3c; color: white; }
+        
+        .alert-warning {
+            background-color: #f1c40f;
+            color: #7f8c8d;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+            margin: 10px 0;
+            display: none;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            background: white;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th { background-color: #f2f2f2; font-weight: bold; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+    <h2>Banknot Seri Numarası Tarayıcı V3.3</h2>
+
+    <div class="card">
+        <div id="statusBox" class="status-box status-loading">Durum: OCR Motoru Yükleniyor... Lütfen Bekleyin.</div>
+        <div id="alertBox" class="alert-warning">⚠️ TEKRAR UYARISI: Bu seri numarası daha önce okundu!</div>
+        
+        <p style="font-size: 13px; color: #666; text-align: center;">
+            Kamerayı açın ve <b>Otomatik Okumayı Başlat</b>'a basın. Banknotun seri numarasını yeşil çerçeveli alana hizalayın.
+        </p>
+
+        <button id="btnOpen" class="btn btn-primary" disabled>Kamerayı Aç</button>
+        <button id="btnStart" class="btn btn-success" disabled>Otomatik Okumayı Başlat</button>
+        <button id="btnStop" class="btn btn-danger" disabled>Kaydet ve Bitir</button>
+    </div>
+
+    <div class="card" style="text-align: center;">
+        <h3>Canlı Kamera Akışı</h3>
+        <div class="video-container">
+            <video id="video" autoplay playsinline muted></video>
+            <div class="scan-overlay"></div>
+        </div>
+    </div>
+
+    <div class="card preview-container">
+        <h3>İşlenen Dijital Filtreli Görüntü (OCR Girişi)</h3>
+        <canvas id="cropCanvas" width="300" height="60"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>Okunan Kayıtlar</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Seri No</th>
+                    <th>Zaman</th>
+                </tr>
+            </thead>
+            <tbody id="resultTable">
+                <!-- Veriler buraya eklenecek -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const cropCanvas = document.getElementById('cropCanvas');
+        const ctx = cropCanvas.getContext('2d');
+        
+        const btnOpen = document.getElementById('btnOpen');
+        const btnStart = document.getElementById('btnStart');
+        const btnStop = document.getElementById('btnStop');
+        const statusBox = document.getElementById('statusBox');
+        const alertBox = document.getElementById('alertBox');
+        const resultTable = document.getElementById('resultTable');
+
+        let stream = null;
+        let scanInterval = null;
+        let worker = null;
+        let isOcrReady = false;
+        let isProcessing = false;
+        
+        let readHistory = new Set();
+        let lastReadText = "";
+        let sameTextCount = 0;
+
+        // Protokol Güvenlik Kontrolü
+        if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+            statusBox.className = "status-box status-error";
+            statusBox.innerText = "Hata: Kamera erişimi için HTTPS protokolü veya localhost zorunludur!";
+        } else {
+            initOCR();
+        }
+
+        // Tesseract.js Modern v5 Yapılandırması
+        async function initOCR() {
+            try {
+                statusBox.className = "status-box status-loading";
+                statusBox.innerText = "Durum: OCR Motoru Başlatılıyor...";
+                
+                worker = await Tesseract.createWorker('eng', 1, {
+                    logger: m => console.log(m)
+                });
+                
+                // Sadece Banknot Seri No karakterlerine (Büyük Harf ve Rakam) odaklanma ve tek satır modu
+                await worker.setParameters({
+                    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+                    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE
+                });
+
+                isOcrReady = true;
+                statusBox.className = "status-box status-ready";
+                statusBox.innerText = "Durum: Kamera Kapalı (OCR Hazır)";
+                btnOpen.disabled = false;
+            } catch (err) {
+                console.error("OCR Yükleme Hatası:", err);
+                statusBox.className = "status-box status-error";
+                statusBox.innerText = "Hata: Dil paketleri yüklenemedi. İnternet bağlantınızı kontrol edin.";
+            }
+        }
+
+        // Kamerayı Açma İşlemi
+        btnOpen.addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: "environment", // Arka kamera
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                });
+                video.srcObject = stream;
+                statusBox.innerText = "Durum: Kamera Açık, Başlatılması Bekleniyor";
+                btnStart.disabled = false;
+                btnOpen.disabled = true;
+            } catch (err) {
+                console.error("Kamera Açma Hatası:", err);
+                alert("Kameraya erişilemedi! İzinleri kontrol edin.");
+            }
+        });
+
+        // Sürekli Tarama Döngüsünü Başlatma
+        btnStart.addEventListener('click', () => {
+            if (!isOcrReady) {
+                alert("OCR motoru henüz hazır değil!");
+                return;
+            }
+            statusBox.innerText = "Durum: Canlı Tarama Yapılıyor...";
+            btnStart.disabled = true;
+            btnStop.disabled = false;
+
+            // 500 ms aralıklarla (Saniyede 2 kare) görüntü yakalama döngüsü
+            scanInterval = setInterval(processFrame, 500);
+        });
+
+        // Kare Yakalama, Dijital Filtreleme ve OCR Gönderimi
+        async function processFrame() {
+            // Eğer bir önceki OCR işlemi hala sürüyorsa bu kareyi pas geç (İşlem çakışmasını engelle)
+            if (isProcessing || video.readyState !== video.HAVE_CURRENT_DATA) return;
+            
+            isProcessing = true;
+            alertBox.style.display = "none";
+
+            // 1. Yeşil Alan Koordinatlarını Hesaplama ve Kırpma (Bölgesel İzolasyon)
+            const vWidth = video.videoWidth;
+            const vHeight = video.videoHeight;
+            
+            // Arayüzdeki %80 genişlik ve 60px yükseklikteki yeşil maskenin gerçek videodaki oran karşılığı
+            const cropWidth = vWidth * 0.8;
+            const cropHeight = (vWidth * 0.8) * (60 / (video.clientWidth * 0.8)); 
+            const cropX = (vWidth - cropWidth) / 2;
+            const cropY = (vHeight - cropHeight) / 2;
+
+            // Canvas boyutlarını eşitle
+            cropCanvas.width = 300;
+            cropCanvas.height = 60;
+
+            // Kameradaki ilgili bölgeyi küçük canvas'a çiz
+            ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, 300, 60);
+
+            // 2. Dijital Görüntü İşleme: Yüksek Kontrastlı Siyah-Beyaz Filtre (Binarization)
+            const imgData = ctx.getImageData(0, 0, 300, 60);
+            const data = imgData.data;
+            const threshold = 120; // Kağıt üzerindeki yazıyı arka plandan ayıran eşik değeri
+
+            for (let i = 0; i < data.length; i += 4) {
+                // Parlaklık formülü (Grayscale dönüşümü)
+                const brightness = 0.34 * data[i] + 0.5 * data[i + 1] + 0.16 * data[i + 2];
+                // Eşik değerinin altındakiler tam siyah (yazı), üstündekiler tam beyaz (arka plan deseni)
+                const color = brightness < threshold ? 0 : 255;
+                data[i] = color;     // R
+                data[i + 1] = color; // G
+                data[i + 2] = color; // B
+            }
+            ctx.putImageData(imgData, 0, 0);
+
+            // 3. OCR Motoruna Filtrelenmiş Resmi Gönderme
+            try {
+                const base64Img = cropCanvas.toDataURL('image/png');
+                const result = await worker.recognize(base64Img);
+                
+                // Okunan metni temizleme (boşlukları ve satır atlamalarını kaldır)
+                let cleanedText = result.data.text.replace(/[^A-Z0-9]/g, "").trim();
+
+                // Banknot seri numaraları genellikle 8-13 karakter aralığındadır (Regex Süzgeci)
+                if (cleanedText.length >= 8 && cleanedText.length <= 13) {
+                    statusBox.innerText = `Son Okunan Aday: ${cleanedText}`;
+                    
+                    // 4. Çift Ardışık Doğrulama Kontrolü
+                    if (cleanedText === lastReadText) {
+                        sameTextCount++;
+                        // Üst üste 2 karede de birebir aynı metin başarıyla okunmuşsa doğrulanmış kabul et
+                        if (sameTextCount >= 2) {
+                            handleVerifiedText(cleanedText);
+                            sameTextCount = 0; // Sayacı sıfırla
+                        }
+                    } else {
+                        lastReadText = cleanedText;
+                        sameTextCount = 1;
+                    }
+                }
+            } catch (ocrErr) {
+                console.error("OCR Çözümleme Hatası:", ocrErr);
+            } finally {
+                isProcessing = false;
+            }
+        }
+
+        // Doğrulanan Seri Numarasını Listeleme ve Hafıza Kontrolü
+        function handleVerifiedText(serialNo) {
+            // Mükerrer Kayıt Kontrolü (TEKRAR UYARISI)
+            if (readHistory.has(serialNo)) {
+                alertBox.innerText = `⚠️ TEKRAR UYARISI: ${serialNo} daha önce okundu!`;
+                alertBox.style.display = "block";
+                return;
+            }
+
+            // Hafızaya Ekle
+            readHistory.add(serialNo);
+
+            // Tabloya Ekle (En güncel okuma en üstte olacak şekilde)
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            
+            const row = document.createElement('tr');
+            row.innerHTML = `<td><b>${serialNo}</b></td><td>${timeStr}</td>`;
+            resultTable.insertBefore(row, resultTable.firstChild);
+        }
+
+        // Kaydet ve Bitir (Kapatma Protokolü)
+        btnStop.addEventListener('click', () => {
+            // Tarama döngüsünü durdur
+            if (scanInterval) clearInterval(scanInterval);
+            
+            // Kamera donanımını kapat
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+
+            statusBox.className = "status-box status-ready";
+            statusBox.innerText = `Tarama Tamamlandı. Toplam ${readHistory.size} Adet Özgün Banknot Kaydedildi.`;
+            
+            btnStart.disabled = true;
+            btnStop.disabled = true;
+            btnOpen.disabled = true;
+        });
+    </script>
+</body>
+</html>
