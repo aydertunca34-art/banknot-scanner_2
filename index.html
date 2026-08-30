@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Banknot Seri Numarası Tarayıcı V3.5</title>
+    <!-- Tesseract.js v5 CDN Entegrasyonu -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --success: #16a34a;
+            --danger: #dc2626;
+            --warning: #ca8a04;
+            --dark: #1e293b;
+            --bg: #f8fafc;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--dark);
+            margin: 0;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 500px;
+            background: white;
+            padding: 16px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        h2 {
+            margin-top: 0;
+            text-align: center;
+            font-size: 1.3rem;
+            color: var(--dark);
+        }
+        .status-box {
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 12px;
+            font-size: 0.9rem;
+            background-color: #f1f5f9;
+            border: 1px solid #cbd5e1;
+        }
+        .status-loading { background-color: #fef9c3; color: var(--warning); border-color: #fef08a; }
+        .status-ready { background-color: #dcfce7; color: var(--success); border-color: #bbf7d0; }
+        .status-active { background-color: #dbeafe; color: var(--primary); border-color: #bfdbfe; }
+        .status-duplicate { background-color: #fee2e2; color: var(--danger); border-color: #fecaca; animation: blink 0.5s infinite alternate; }
+        
+        @keyframes blink {
+            from { opacity: 1; } to { opacity: 0.7; }
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .scanner-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+        }
+        .target-box {
+            width: 75%;
+            height: 22%;
+            border: 3px solid #22c55e;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+            border-radius: 4px;
+            position: relative;
+        }
+        .target-box::after {
+            content: 'SERİ NUMARASINI BURAYA HİZALAYIN';
+            position: absolute;
+            top: -22px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: #22c55e;
+            font-size: 0.65rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 2px black;
+        }
+        .preview-box {
+            width: 100%;
+            background: #f1f5f9;
+            padding: 8px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            box-sizing: border-box;
+        }
+        .preview-title {
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: #64748b;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+        canvas {
+            width: 100%;
+            height: 60px;
+            background: white;
+            border-radius: 4px;
+            display: block;
+            object-fit: contain;
+        }
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        button {
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: white;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-start { background-color: var(--primary); }
+        .btn-stop { background-color: var(--dark); }
+        
+        .table-container {
+            width: 100%;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            text-align: left;
+        }
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        th {
+            background-color: #f1f5f9;
+            color: #475569;
+            position: sticky;
+            top: 0;
+        }
+        tr:nth-child(even) { background-color: #f8fafc; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Banknot Seri Numarası Tarayıcı V3.5</h2>
+    
+    <div id="statusBox" class="status-box status-loading">
+        Durum: OCR Motoru Yükleniyor... Lütfen Bekleyin
+    </div>
+
+    <div class="video-container">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="scanner-overlay">
+            <div class="target-box"></div>
+        </div>
+    </div>
+
+    <div class="preview-box">
+        <div class="preview-title">İşlenen Dijital Filtreli Görüntü (QR Modu Canlı)</div>
+        <canvas id="cropCanvas" width="300" height="70"></canvas>
+    </div>
+
+    <div class="btn-group">
+        <button id="btnStart" class="btn-start" disabled onclick="initCamera()">Kamerayı Aç</button>
+        <button id="btnStop" class="btn-stop" disabled onclick="stopScanner()">Kaydet ve Bitir</button>
+    </div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Seri No</th>
+                    <th>Zaman Damgası</th>
+                </tr>
+            </thead>
+            <tbody id="resultTableBody">
+                <!-- Veriler buraya eklenecek -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    let worker = null;
+    let stream = null;
+    let scanInterval = null;
+    let isProcessing = false;
+    const registeredSerials = new Set();
+    
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('cropCanvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const statusBox = document.getElementById('statusBox');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+    const resultTableBody = document.getElementById('resultTableBody');
+
+    // PROTOKOL GÜVENLİK KONTROLÜ (HTTPS ya da Localhost zorunluluğu)
+    window.addEventListener('load', () => {
+        const isSecure = window.location.protocol === 'https:' || 
+                         window.location.hostname === 'localhost' || 
+                         window.location.hostname === '127.0.0.1';
+        
+        if (!isSecure) {
+            statusBox.className = "status-box status-duplicate";
+            statusBox.innerText = "Hata: Kamera erişimi için HTTPS protokolü veya localhost zorunludur! (file:// desteklenmez)";
+            return;
+        }
+        initOCR();
+    });
+
+    // 1. TESSERACT OCR MOTORUNU HIZLICA AYAĞA KALDIRMA (v5 Mimari)
+    async function initOCR() {
+        try {
+            worker = await Tesseract.createWorker('eng');
+            
+            // Karekod hızına ulaşmak için motor parametreleri optimize ediliyor
+            await worker.setParameters({
+                tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', // Sadece banknot karakterleri
+                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE, // Tek satır okuma modu
+                tessjs_create_hocr: '0',
+                tessjs_create_tsv: '0',
+                tessjs_create_box: '0'
+            });
+
+            statusBox.className = "status-box status-ready";
+            statusBox.innerText = "Durum: Kamera Kapalı (OCR Hazır)";
+            btnStart.disabled = false;
+        } catch (error) {
+            console.error("OCR Yükleme Hatası:", error);
+            statusBox.className = "status-box status-duplicate";
+            statusBox.innerText = "Hata: OCR dil paketleri yüklenemedi. İnternet bağlantınızı kontrol edin.";
+        }
+    }
+
+    // 2. KAMERAYI EN GELİŞMİŞ ODAKLAMA PARAMETRELERİYLE AÇMA
+    async function initCamera() {
+        try {
+            if (stream) stopScanner();
+
+            // Arka kamerayı en yüksek çözünürlük ve sürekli odaklama modu ile tetikle
+            const constraints = {
+                video: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    focusMode: "continuous",
+                    whiteBalanceMode: "continuous"
+                },
+                audio: false
+            };
+
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            
+            btnStart.disabled = true;
+            btnStop.disabled = false;
+            
+            statusBox.className = "status-box status-active";
+            statusBox.innerText = "Durum: Canlı Tarama Aktif (Karekod Modu)";
+
+            // Görüntü akışı oturduğunda "görür görmez" tarama döngüsünü başlat (200ms)
+            video.onloadedmetadata = () => {
+                scanInterval = setInterval(processFrame, 200);
+            };
+        } catch (error) {
+            console.error("Kamera Hatası:", error);
+            statusBox.className = "status-box status-duplicate";
+            statusBox.innerText = "Hata: Kameraya erişilemedi veya izin reddedildi.";
+        }
+    }
+
+    // 3. QR OKUYUCU HIZINDA KESİNTİSİZ GÖRÜNTÜ İŞLEME VE KIRPMA
+    async function processFrame() {
+        // Eğer bir önceki OCR işlemi hala bitmediyse thread'i tıkama, bu kareyi atla
+        if (isProcessing || !worker || video.paused || video.ended) return;
+
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+        if (videoWidth === 0 || videoHeight === 0) return;
+
+        // Ekranda görünen yeşil kutunun hedef oranları
+        // Genişlik %75, Yükseklik %22, Ortalanmış konum
+        const boxWidthRatio = 0.75;
+        const boxHeightRatio = 0.22;
+        
+        const cropWidth = videoWidth * boxWidthRatio;
+        const cropHeight = videoHeight * boxHeightRatio;
+        const cropX = (videoWidth - cropWidth) / 2;
+        const cropY = (videoHeight - cropHeight) / 2;
+
+        // Gerçek piksel koordinatlarına göre yeşil alanı tam yerinden kırp
+        ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+
+        // --- BİNARİZASYON & ADAPTİF SERT KONTRAST FİLTRESİ ---
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imgData.data;
+        
+        // Dinamik gri tonlama ve eşikleme
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            
+            // Renk kalabalığını temizle (Gri tonlama)
+            const grayscale = 0.299 * r + 0.587 * g + 0.114 * b;
+            
+            // Sert Siyah-Beyaz Eşikleme (Banknot desenlerini uçurur, yazıyı bırakır)
+            // Ortam ışığına duyarlı adaptif eşik seviyesi (115)
+            const thresholdValue = grayscale > 115 ? 255 : 0;
+            
+            data[i] = thresholdValue;     // R
+            data[i + 1] = thresholdValue; // G
+            data[i + 2] = thresholdValue; // B
+        }
+        ctx.putImageData(imgData, 0, 0);
+
+        // --- GÖRÜR GÖRMEZ ALGINALAYAN OCR ANALİZİ ---
+        isProcessing = true;
+        try {
+            const { data: { text } } = await worker.recognize(canvas);
+            
+            // OCR çıktısını temizle: Boşlukları kaldır ve Yapay Zeka Hata Tolerans Eşlemelerini yap
+            let cleanedText = text.replace(/\s+/g, '').toUpperCase();
+            cleanedText = cleanedText.replace(/O/g, '0'); // Yaygın OCR yanılsaması: Harf O -> Sıfır 0
+            cleanedText = cleanedText.replace(/[IL]/g, '1'); // Harf I veya L -> Bir 1
+            
+            // Banknot seri numarası formatı filtresi (Genelde 8-13 karakter uzunluğundadır)
+            const serialRegex = /^[A-Z0-9]{8,13}$/;
+
+            if (serialRegex.test(cleanedText)) {
+                handleOcrSuccess(cleanedText);
+            }
+        } catch (ocrError) {
+            console.error("OCR Analiz Hatası:", ocrError);
+        } finally {
+            isProcessing = false;
+        }
+    }
+
+    // 4. KAREKOD SIFIR GECİKMELİ VERİ YAZMA VE TEKRAR KONTROLÜ
+    function handleOcrSuccess(serialNumber) {
+        // Eğer seri numarası listede zaten varsa: Canlı TEKRAR UYARISI ver
+        if (registeredSerials.has(serialNumber)) {
+            statusBox.className = "status-box status-duplicate";
+            statusBox.innerText = `⚠️ TEKRAR UYARISI: ${serialNumber} zaten okundu!`;
+            
+            // 1.5 saniye sonra durumu eski haline getir
+            setTimeout(() => {
+                if (stream && scanInterval) {
+                    statusBox.className = "status-box status-active";
+                    statusBox.innerText = "Durum: Canlı Tarama Aktif (Karekod Modu)";
+                }
+            }, 1500);
+            return;
+        }
+
+        // Yeni bir seri numarası ise: Listeye mikrosaniyeler içinde ekle ve arayüzü yeşil yak
+        registeredSerials.add(serialNumber);
+        
+        statusBox.className = "status-box status-ready";
+        statusBox.innerText = `✅ BAŞARIYLA OKUNDU: ${serialNumber}`;
+
+        // Zaman damgası oluştur
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('tr-TR') + '.' + String(now.getMilliseconds()).padStart(3, '0');
+
+        // En son okunan seri numarasını tablonun EN ÜSTÜNE ekle
+        const row = document.createElement('tr');
+        row.innerHTML = `<td><strong>${serialNumber}</strong></td><td>${timeStr}</td>`;
+        resultTableBody.insertBefore(row, resultTableBody.firstChild);
+
+        // Başarı görsel geri bildirimi (Kısa süre sonra canlı moda dön)
+        setTimeout(() => {
+            if (stream && scanInterval) {
+                statusBox.className = "status-box status-active";
+                statusBox.innerText = "Durum: Canlı Tarama Aktif (Karekod Modu)";
+            }
+        }, 800);
+    }
+
+    // 5. KAPATMA PROTOKOLÜ (Kaydet ve Bitir)
+    function stopScanner() {
+        if (scanInterval) {
+            clearInterval(scanInterval);
+            scanInterval = null;
+        }
+        
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
+
+        video.srcObject = null;
+        isProcessing = false;
+        
+        btnStart.disabled = false;
+        btnStop.disabled = true;
+        
+        statusBox.className = "status-box status-ready";
+        statusBox.innerText = `Durum: Tarama Bitti. Toplam ${registeredSerials.size} Adet Banknot Kaydedildi.`;
+    }
+</script>
+
+</body>
+</html>
